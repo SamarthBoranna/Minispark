@@ -34,7 +34,6 @@ typedef enum {
 
 typedef struct{
   void *data;
-  RDD *rdd;
   struct node *next;
 }node;
 
@@ -54,6 +53,8 @@ struct RDD {
   int numdependencies; // 0, 1, or 2
 
   int numpartitions;
+
+  int materialized;
 
   // you may want extra data members here
 };
@@ -85,6 +86,64 @@ typedef struct { //
   struct Task *next;
 } Task;
 
+//////// list actions ////////
+
+List *initList(List *list){
+  list->head = NULL;
+  list->tail = NULL;
+  list->size = 0;
+  return list;
+}
+
+int append(List *list, node *new_node){
+  new_node->next = NULL;
+  if(list->head == NULL){
+    list->head = new_node;
+    list->tail = new_node;
+  }
+  else{
+    node *tail = list->tail;
+    tail->next = new_node;
+    list->tail = new_node;
+  }
+  list->size += 1;
+  return 0;
+}
+
+node *getList(List *list, int index){
+  if(index < 0 || index >= list->size){
+    return NULL;
+  }
+  node *curr = list->head;
+  for(int i = 0; i<index; i++){
+    curr = curr->next;
+  }
+
+  return curr;
+}
+
+node *nextList(node *curr_node){
+  if(curr_node->next == NULL){
+    return NULL;
+  }
+  else return curr_node->next; 
+}
+
+node *seek_from_start(List *list){
+  if(list->head == NULL){
+    return NULL;
+  }
+  return list->head;
+}
+
+void freeList(List *list){
+  while(list->head != NULL){
+    node *curr = list->head;
+    list->head = curr->next;
+    free(curr);
+  }
+  free(list);
+}
 //////// task queue actions ////////
 
 void initQueue(TaskQueue* queue) {

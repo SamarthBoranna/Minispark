@@ -106,6 +106,8 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
 }
 
 void execute(RDD* rdd) {
+  
+  if(rdd->dependencies)
   return;
 }
 

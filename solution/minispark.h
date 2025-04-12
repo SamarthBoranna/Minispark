@@ -2,6 +2,9 @@
 #define __minispark_h__
 
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
 
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
@@ -29,6 +32,17 @@ typedef enum {
   FILE_BACKED
 } Transform;
 
+typedef struct{
+  void *data;
+  struct node *next;
+}node;
+
+struct List{
+  node *head;
+  node *tail;
+  int size;
+};
+
 struct RDD {    
   Transform trans; // transform type, see enum
   void* fn; // transformation function
@@ -38,8 +52,24 @@ struct RDD {
   RDD* dependencies[MAXDEPS];
   int numdependencies; // 0, 1, or 2
 
+  int numpartitions;
+
+  int materialized;
+
   // you may want extra data members here
 };
+
+typedef struct{
+  int numThreads;
+  TaskQueue queue;
+}ThreadPool;
+
+typedef struct{
+  Task *head;
+  Task *tail;
+  int size;
+  pthread_mutex_t lock;
+}TaskQueue;
 
 typedef struct {
   struct timespec created;
@@ -49,11 +79,113 @@ typedef struct {
   int pnum;
 } TaskMetric;
 
-typedef struct {
+typedef struct { //
   RDD* rdd;
   int pnum;
   TaskMetric* metric;
+  struct Task *next;
 } Task;
+
+//////// list actions ////////
+
+List *initList(List *list){
+  list->head = NULL;
+  list->tail = NULL;
+  list->size = 0;
+  return list;
+}
+
+int append(List *list, node *new_node){
+  new_node->next = NULL;
+  if(list->head == NULL){
+    list->head = new_node;
+    list->tail = new_node;
+  }
+  else{
+    node *tail = list->tail;
+    tail->next = new_node;
+    list->tail = new_node;
+  }
+  list->size += 1;
+  return 0;
+}
+
+node *getList(List *list, int index){
+  if(index < 0 || index >= list->size){
+    return NULL;
+  }
+  node *curr = list->head;
+  for(int i = 0; i<index; i++){
+    curr = curr->next;
+  }
+
+  return curr;
+}
+
+node *nextList(node *curr_node){
+  if(curr_node->next == NULL){
+    return NULL;
+  }
+  else return curr_node->next; 
+}
+
+node *seek_from_start(List *list){
+  if(list->head == NULL){
+    return NULL;
+  }
+  return list->head;
+}
+
+void freeList(List *list){
+  while(list->head != NULL){
+    node *curr = list->head;
+    list->head = curr->next;
+    free(curr);
+  }
+  free(list);
+}
+//////// task queue actions ////////
+
+void initQueue(TaskQueue* queue) {
+  queue->head = NULL;
+  queue->tail = NULL;
+  queue->size = 0;
+  pthread_mutex_init(&queue->lock, NULL);
+}
+
+Task *pop(TaskQueue *queue){
+  pthread_mutex_lock(&queue->lock);
+  if(queue == NULL || queue->head == NULL){
+    pthread_mutex_unlock(&queue->lock);
+    return NULL;
+    //error?
+  }
+
+  Task *popped = queue->head;
+  Task *next = popped->next;
+  queue->head = next;
+  queue->size -= 1;
+  pthread_mutex_unlock(&queue->lock);
+
+  return popped;
+}
+
+int push(TaskQueue *queue, Task *taskToPush){
+  taskToPush->next = NULL;
+  pthread_mutex_lock(&queue->lock);
+  if(queue->head == NULL){
+    queue->head = taskToPush;
+    queue->tail = taskToPush;
+  }
+  else{
+    Task *tail = queue->tail;
+    tail->next = taskToPush;
+    queue->tail = taskToPush;
+  }
+  queue->size += 1;
+  pthread_mutex_unlock(&queue->lock);
+  return 0;
+}
 
 //////// actions ////////
 

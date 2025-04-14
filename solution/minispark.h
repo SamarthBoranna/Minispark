@@ -60,8 +60,12 @@ struct RDD {
 };
 
 typedef struct{
+  pthread_t *threads;
   int numThreads;
-  TaskQueue queue;
+  TaskQueue *queue;
+  int stop;
+  pthread_mutex_t work_lock;
+  pthread_cond_t toBeDone;
 }ThreadPool;
 
 typedef struct{
@@ -86,7 +90,13 @@ typedef struct { //
   struct Task *next;
 } Task;
 
-//////// list actions ////////
+//////// Thread Pool Actions ////////
+
+ThreadPool *initThreadPool(ThreadPool *tpool){
+  tpool->numThreads = 
+}
+
+//////// List Actions ////////
 
 List *initList(List *list){
   list->head = NULL;

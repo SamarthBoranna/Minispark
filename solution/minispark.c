@@ -107,7 +107,17 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
 
 void execute(RDD* rdd) {
   
-  if(rdd->dependencies)
+  for(int i = 0; i<rdd->numdependencies; i++){
+    execute(rdd->dependencies[i]);
+  }
+  
+  switch(rdd->trans){
+    case MAP:
+    case FILTER:
+    case JOIN:
+    case PARTITIONBY:
+    case FILE_BACKED:
+  }
   return;
 }
 

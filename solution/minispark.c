@@ -160,6 +160,59 @@ void execute(RDD* rdd) {
   return;
 }
 
+void materialize(RDD* rdd, int pnum) {
+  node* partition_node = getList(rdd->partitions, pnum);
+  List* partition = partition_node->data;
+
+  switch (rdd->trans) {
+    case MAP:
+      if (rdd->numdependencies > 0) {
+        RDD* dep = rdd->dependencies[0];
+        node* dep_partition_node = getList(dep->partitions, pnum);
+        List* dep_partition = dep_partition_node->data;
+        Mapper map_fn = (Mapper)rdd->fn;
+
+        // Apply map to all nodes
+        node* curr = seek_from_start(dep_partition);
+        while (curr != NULL) {
+          void* result = map_fn(curr->data);
+          if (result != NULL) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = result;
+            append(partition, new_node);
+          }
+          curr = nextList(curr);
+        }
+      }
+      // Otherwise its a FILE-BACKED RDD
+      break;
+
+    case FILTER:
+      RDD* dep = rdd->dependencies[0];
+      node* dep_partition_node = getList(dep->partitions, pnum);
+      List* dep_partition = dep_partition_node->data;
+      Filter filter_fn = (Filter)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply filter to all nodes
+      node* curr = seek_from_start(dep_partition);
+      while (curr != NULL) {
+        if (filter_fn(curr->data, ctx)) { // filter the current node's data
+          node* new_node = malloc(sizeof(node));
+          new_node->data = curr->data;
+          append(partition, new_node);
+        }
+        curr = nextList(curr);
+      }
+      break;
+
+    case JOIN:
+    
+    case PARTITIONBY:
+      
+  }
+}
+
 void MS_Run() {
   return;
 }

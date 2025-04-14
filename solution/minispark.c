@@ -44,6 +44,7 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   rdd->trans = t;
   rdd->fn = fn;
   rdd->partitions = NULL;
+  rdd->materialized = 0;
   return rdd;
 }
 
@@ -87,7 +88,8 @@ void *identity(void *arg)
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
-  rdd->partitions = list_init(numfiles);
+  List* list = malloc(sizeof(List));
+  rdd->partitions = list_init(list);
 
   for (int i = 0; i < numfiles; i++)
   {
@@ -106,8 +108,55 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
 }
 
 void execute(RDD* rdd) {
-  
-  if(rdd->dependencies)
+
+  // Skip already materialized RDDs
+  if (rdd->materialized) return;
+
+  // Materialize dependencies
+  for (int i = 0; i < rdd->numdependencies; i++) {
+    execute(rdd->dependencies[i]);
+  }
+
+  // Determine num partitions
+  int num_partitions = 1;
+  // Transformations
+  if (rdd->numdependencies > 0) {
+    if (rdd->trans != PARTITIONBY)
+      num_partitions = rdd->dependencies[0]->numpartitions;
+    else
+      num_partitions = rdd->numpartitions;
+  }
+  // File-backed RDDs
+  else if (rdd->trans == FILE_BACKED || rdd->partitions != NULL) {
+    num_partitions = rdd->numpartitions;
+  }
+
+  // Init partitions
+  if (rdd->partitions == NULL) {
+    List* list = malloc(sizeof(List));
+    rdd->partitions = list_init(list); 
+    
+    // Initialize each partition as an empty list??
+    for (int i = 0; i < num_partitions; i++) {
+      List* partition = malloc(sizeof(List));
+      list_init(partition);
+
+      node* partition_node = malloc(sizeof(node));
+      partition_node->data=partition;
+      list_add_elem(rdd->partitions, partition_node);
+    }
+  }
+
+  for (int i = 0; i < rdd->numpartitions; i++) {
+    Task* task = malloc(sizeof(Task));
+    task->rdd = rdd;
+    task->pnum = i;
+    // add the tasks to the task queue 
+
+    push(taskQueue, task) // need to initialize queue
+  }
+
+  rdd->materialized = 1;
   return;
 }
 

@@ -1,5 +1,7 @@
 #include "minispark.h"
 
+static ThreadPool *global_pool = NULL;
+
 // Working with metrics...
 // Recording the current time in a `struct timespec`:
 //    clock_gettime(CLOCK_MONOTONIC, &metric->created);
@@ -142,4 +144,214 @@ void print(RDD *rdd, Printer p) {
 
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
+}
+
+//////// Thread Pool Actions ////////
+
+ThreadPool *initThreadPool(int numthreads){
+  ThreadPool *tpool = malloc(sizeof(ThreadPool));
+  if(tpool == NULL){
+    perror("malloc");
+    exit(1); 
+  }
+
+  tpool->numThreads = numthreads;
+  tpool->stop = 0;
+
+  tpool->threads = malloc(numthreads * sizeof(pthread_t));
+  if(tpool->threads == NULL){
+    perror("malloc");
+    exit(1);
+  }
+
+  tpool->queue = malloc(sizeof(TaskQueue));
+  if(tpool->queue == NULL){
+    perror("malloc");
+    exit(1);
+  }
+  initQueue(tpool->queue);
+  pthread_mutex_init(&tpool->work_lock, NULL);
+
+  for(int i = 0; i<numthreads; i++){
+    pthread_create(&tpool->threads[i], NULL, worker, tpool);
+  }
+
+  pthread_cond_init(&tpool->toBeDone, NULL);
+  pthread_cond_init(&tpool->waiting, NULL); 
+  tpool->activeTasks = 0;
+
+  return tpool;
+}
+
+void thread_pool_destroy(){
+
+  pthread_mutex_lock(&global_pool->work_lock);
+  global_pool->stop = 1;
+  pthread_cond_broadcast(&global_pool->toBeDone);
+  pthread_mutex_unlock(&global_pool->work_lock);
+
+  for(int i = 0; i<global_pool->numThreads; i++){
+    int join_ret = pthread_join(global_pool->threads[i], NULL);
+    //error?
+  }
+
+  free(global_pool->queue);
+  pthread_mutex_destroy(&global_pool->work_lock);
+  pthread_cond_destroy(&global_pool->toBeDone);
+  free(global_pool->threads);
+  free(global_pool);
+  global_pool = NULL;
+}
+
+void thread_pool_wait(){
+  pthread_mutex_lock(&global_pool->work_lock);
+  TaskQueue *queue = global_pool->queue;
+  while(queue->size != 0 || global_pool->activeTasks != 0){
+    pthread_cond_wait(&global_pool->waiting, &global_pool->work_lock);
+  }
+  pthread_cond_signal(&global_pool->waiting);
+  pthread_mutex_unlock(&global_pool->work_lock);
+}
+
+int thread_pool_submit(ThreadPool* tpool, Task* task){
+  int push_val = push(tpool->queue, task);
+  if(push_val == 0){
+    pthread_mutex_lock(&tpool->work_lock);
+    pthread_cond_signal(&tpool->toBeDone);
+    pthread_mutex_unlock(&tpool->work_lock);
+  }
+  return push_val;
+}
+
+void *worker(void *argument){
+  ThreadPool *tpool = (ThreadPool *)argument;
+
+  while(1){
+    pthread_mutex_lock(&tpool->work_lock);
+    TaskQueue *queue = tpool->queue;
+    while(queue->size == 0 && tpool->stop == 0){
+      pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
+    }
+
+    if(tpool->stop){
+      pthread_mutex_unlock(&tpool->work_lock);
+      break;
+    }
+
+    Task *taskToBeDone = pop(queue);
+    tpool->activeTasks += 1;
+    pthread_mutex_unlock(&tpool->work_lock);
+
+    if(taskToBeDone != NULL){
+      //process task
+      pthread_mutex_lock(&tpool->work_lock);
+      tpool->activeTasks -= 1;
+      if(queue->size == 0 && tpool->activeTasks == 0){
+        pthread_cond_signal(&tpool->waiting);
+      }
+      pthread_mutex_unlock(&tpool->work_lock);
+    }
+    return NULL;
+
+  }
+}
+//////// List Actions ////////
+
+List *initList(List *list){
+  list->head = NULL;
+  list->tail = NULL;
+  list->size = 0;
+  return list;
+}
+
+int append(List *list, node *new_node){
+  new_node->next = NULL;
+  if(list->head == NULL){
+    list->head = new_node;
+    list->tail = new_node;
+  }
+  else{
+    node *tail = list->tail;
+    tail->next = new_node;
+    list->tail = new_node;
+  }
+  list->size += 1;
+  return 0;
+}
+
+node *getList(List *list, int index){
+  if(index < 0 || index >= list->size){
+    return NULL;
+  }
+  node *curr = list->head;
+  for(int i = 0; i<index; i++){
+    curr = curr->next;
+  }
+
+  return curr;
+}
+
+node *nextList(node *curr_node){
+  if(curr_node->next == NULL){
+    return NULL;
+  }
+  else return curr_node->next; 
+}
+
+node *seek_from_start(List *list){
+  if(list->head == NULL){
+    return NULL;
+  }
+  return list->head;
+}
+
+void freeList(List *list){
+  while(list->head != NULL){
+    node *curr = list->head;
+    list->head = curr->next;
+    free(curr);
+  }
+  free(list);
+}
+//////// task queue actions ////////
+
+void initQueue(TaskQueue* queue) {
+  queue->head = NULL;
+  queue->tail = NULL;
+  queue->size = 0;
+  pthread_mutex_init(&queue->lock, NULL);
+}
+
+Task *pop(TaskQueue *queue){
+  pthread_mutex_lock(&queue->lock);
+  if(queue == NULL || queue->head == NULL){
+    pthread_mutex_unlock(&queue->lock);
+    return NULL;
+    //error?
+  }
+
+  Task *popped = queue->head;
+  Task *next = popped->next;
+  queue->head = next;
+  queue->size -= 1;
+  pthread_mutex_unlock(&queue->lock);
+
+  return popped;
+}
+
+int push(TaskQueue *queue, Task *taskToPush){
+  taskToPush->next = NULL;
+  pthread_mutex_lock(&queue->lock);
+  if(queue->head == NULL){
+    queue->head = taskToPush;
+    queue->tail = taskToPush;
+  }
+  else{
+    Task *tail = queue->tail;
+    tail->next = taskToPush;
+    queue->tail = taskToPush;
+  }
+  queue->size += 1;
+  pthread_mutex_unlock(&queue->lock);
+  return 0;
 }

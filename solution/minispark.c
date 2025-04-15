@@ -44,6 +44,7 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   rdd->trans = t;
   rdd->fn = fn;
   rdd->partitions = NULL;
+  rdd->materialized = 0;
   return rdd;
 }
 
@@ -87,7 +88,8 @@ void *identity(void *arg)
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
-  rdd->partitions = list_init(numfiles);
+  List* list = malloc(sizeof(List));
+  rdd->partitions = list_init(list);
 
   for (int i = 0; i < numfiles; i++)
   {
@@ -106,9 +108,168 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
 }
 
 void execute(RDD* rdd) {
-  
-  if(rdd->dependencies)
-  return;
+
+  // Skip already materialized RDDs
+  if (rdd->materialized) return;
+
+  // Materialize dependencies
+  for (int i = 0; i < rdd->numdependencies; i++) {
+    execute(rdd->dependencies[i]);
+  }
+
+  // Determine num partitions
+  int num_partitions = 1;
+  // Transformations
+  if (rdd->numdependencies > 0) {
+    if (rdd->trans != PARTITIONBY)
+      num_partitions = rdd->dependencies[0]->numpartitions;
+    else
+      num_partitions = rdd->numpartitions;
+  }
+  // File-backed RDDs
+  else if (rdd->trans == FILE_BACKED || rdd->partitions != NULL) {
+    num_partitions = rdd->numpartitions;
+  }
+
+  // Init partitions
+  if (rdd->partitions == NULL) {
+    List* list = malloc(sizeof(List));
+    rdd->partitions = list_init(list); 
+    
+    // Initialize each partition as an empty list??
+    for (int i = 0; i < num_partitions; i++) {
+      List* partition = malloc(sizeof(List));
+      list_init(partition);
+
+      node* partition_node = malloc(sizeof(node));
+      partition_node->data=partition;
+      list_add_elem(rdd->partitions, partition_node);
+    }
+  }
+
+  for (int i = 0; i < rdd->numpartitions; i++) {
+    Task* task = malloc(sizeof(Task));
+    task->rdd = rdd;
+    task->pnum = i;
+
+    // add the tasks to the task queue 
+    pthread_mutex_lock(&global_pool->queue->lock);
+    push(global_pool->queue, task);
+    pthread_mutex_unlock(&global_pool->queue->lock);
+
+    // signal workers of new work
+    pthread_mutex_lock(&global_pool->work_lock);
+    pthread_cond_signal(&global_pool->toBeDone);
+    pthread_mutex_unlock(&global_pool->work_lock);
+  }
+
+  thread_pool_wait();
+  rdd->materialized = 1;
+}
+
+void materialize(RDD* rdd, int pnum) {
+  node* partition_node = getList(rdd->partitions, pnum);
+  List* partition = partition_node->data;
+
+  switch (rdd->trans) {
+    case MAP: {
+      if (rdd->numdependencies > 0) {
+        RDD* dep = rdd->dependencies[0];
+        node* dep_partition_node = getList(dep->partitions, pnum);
+        List* dep_partition = dep_partition_node->data;
+        Mapper map_fn = (Mapper)rdd->fn;
+
+        // Apply map to all nodes
+        node* curr = seek_from_start(dep_partition);
+        while (curr != NULL) {
+          void* result = map_fn(curr->data);
+          if (result != NULL) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = result;
+            append(partition, new_node);
+          }
+          curr = nextList(curr);
+        }
+      }
+      // Otherwise its a FILE-BACKED RDD
+      break;
+    }
+
+    case FILTER: {
+      RDD* dep = rdd->dependencies[0];
+      node* dep_partition_node = getList(dep->partitions, pnum);
+      List* dep_partition = dep_partition_node->data;
+      Filter filter_fn = (Filter)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply filter to all nodes
+      node* curr = seek_from_start(dep_partition);
+      while (curr != NULL) {
+        if (filter_fn(curr->data, ctx)) { // filter the current node's data
+          node* new_node = malloc(sizeof(node));
+          new_node->data = curr->data;
+          append(partition, new_node);
+        }
+        curr = nextList(curr);
+      }
+      break;
+    }
+
+    case JOIN: {
+      RDD* dep1 = rdd->dependencies[0];
+      node* dep1_partition_node = getList(dep1->partitions, pnum);
+      List* dep1_partition = dep1_partition_node->data;
+
+      RDD* dep2 = rdd->dependencies[1];
+      node* dep2_partition_node = getList(dep2->partitions, pnum);
+      List* dep2_partition = dep2_partition_node->data;
+
+      Joiner join_fn = (Joiner)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply inner join
+      node* curr1 = seek_from_start(dep1_partition);
+      while (curr1 != NULL) {
+        node* curr2 = seek_from_start(dep2_partition);
+        while (curr2 != NULL) {
+          void* result = join_fn(curr1->data, curr2->data, ctx);
+          if (result != NULL) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = result;
+            append(partition, new_node);
+          }
+          curr2 = nextList(curr2);
+        }
+        curr1 = nextList(curr1);
+      }
+      break;
+    }
+
+    case PARTITIONBY: {
+      RDD* dep = rdd->dependencies[0];
+      Partitioner partitioner_fn = (Partitioner)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply partition function
+      for (int i = 0; i < dep->partitions->size; i++) {
+        node* dep_partition_node = getList(dep->partitions, i);
+        List* dep_partition = dep_partition_node->data;
+        
+        node* curr = seek_from_start(dep_partition);
+        while (curr != NULL) {
+          // Make sure to partition number matches
+          unsigned long result_partition = partitioner_fn(curr->data, rdd->numpartitions, ctx);          
+          if (result_partition == pnum) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = curr->data;
+            append(partition, new_node);
+          }
+          curr = nextList(curr);
+        }
+      }
+      break;
+    }
+  }
 }
 
 void MS_Run() {
@@ -124,6 +285,11 @@ int count(RDD *rdd) {
 
   int count = 0;
   // count all the items in rdd
+  for(int i = 0; i < rdd->partitions->size; i++) {
+    node* partition_node = getList(rdd->partitions, i);
+    List* partition = partition_node->data;
+    count += partition->size;
+  }
   return count;
 }
 
@@ -132,4 +298,13 @@ void print(RDD *rdd, Printer p) {
 
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
+  for (int i = 0; i < rdd->partitions->size; i++) {
+    node* partition_node = getList(rdd->partitions, i);
+    List* partition = partition_node->data;
+    node* curr = seek_from_start(partition);
+    while (curr != NULL) {
+      p(curr->data);
+      curr = nextList(curr);
+    }
+  }
 }

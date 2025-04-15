@@ -477,11 +477,8 @@ void *worker(void *argument){
     pthread_mutex_unlock(&tpool->work_lock);
 
     if(taskToBeDone != NULL){
-      pthread_mutex_lock(&tpool->work_lock);
-      Task *currTask = queue->head;
-      RDD *rddToDo = currTask->rdd;
-      int pnum = currTask->pnum;
-      materialize(rddToDo, pnum);
+      materialize(taskToBeDone->rdd, taskToBeDone->pnum);
+      pthread_mutex_lock(&tpool->work_lock); 
       tpool->activeTasks -= 1;
       if(queue->size == 0 && tpool->activeTasks == 0){
         pthread_cond_signal(&tpool->waiting);

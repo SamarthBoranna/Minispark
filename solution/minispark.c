@@ -124,12 +124,27 @@ void execute(RDD* rdd) {
 }
 
 void MS_Run() {
-  
-  global_pool = initThreadPool()
+  cpu_set_t set;
+  CPU_ZERO(&set);
+
+  if (sched_getaffinity(0, sizeof(set), &set) == -1) {
+    perror("sched_getaffinity");
+    exit(1);
+  }
+
+  int numthreads = CPU_COUNT(&set);
+
+  global_pool = initThreadPool(numthreads);
+  TaskQueue *queue = malloc(sizeof(TaskQueue));
+  initQueue(queue);
+  global_pool->queue = queue;
   return;
 }
 
 void MS_TearDown() {
+  thread_pool_wait();
+  thread_pool_destroy();
+  //need to free RDD somehow
   return;
 }
 
@@ -197,9 +212,12 @@ void thread_pool_destroy(){
     //error?
   }
 
+  TaskQueue *queue = global_pool->queue;
+  freeQueue(queue->head);
   free(global_pool->queue);
   pthread_mutex_destroy(&global_pool->work_lock);
   pthread_cond_destroy(&global_pool->toBeDone);
+  pthread_cond_destroy(&global_pool->waiting);
   free(global_pool->threads);
   free(global_pool);
   global_pool = NULL;
@@ -356,4 +374,24 @@ int push(TaskQueue *queue, Task *taskToPush){
   queue->size += 1;
   pthread_mutex_unlock(&queue->lock);
   return 0;
+}
+
+void freeQueue(node *head) {
+  node *current = head;
+  while (current != NULL) {
+    node *next = current->next;
+    free(current);
+    current = next;
+  }
+}
+
+void freeRDD(RDD *rdd){
+  if (rdd == NULL) return;
+  for (int i = 0; i < rdd->numdependencies; i++) {
+    freeRDD(rdd->dependencies[i]);
+  }
+  if (rdd->partitions != NULL) {
+    freeList(rdd->partitions);
+  }
+  free(rdd);
 }

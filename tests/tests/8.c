@@ -13,5 +13,12 @@ int main(int argc, char* argv[]) {
   print(filter(map(files, GetLines), StringContains, argv[1]), StringPrinter);
 
   MS_TearDown();
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

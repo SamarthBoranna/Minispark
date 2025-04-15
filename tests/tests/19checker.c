@@ -31,10 +31,10 @@ void printfile(struct row **file, int wrongline, int npartitions)
     struct colpart_ctx pctx;
     pctx.keynum = 0;
     printf("wrong partition order, prev partition smaller than cur or having too large partition number\n");
-    printf("prev line : (partition %d)\n", ColumnHashPartitioner(file[wrongline - 1], npartitions, &pctx));
+    printf("prev line : (partition %ld)\n", ColumnHashPartitioner(file[wrongline - 1], npartitions, &pctx));
     RowPrinter(file[wrongline - 1]);
 
-    printf("cur line : (partition %d)\n", ColumnHashPartitioner(file[wrongline], npartitions, &pctx));
+    printf("cur line : (partition %ld)\n", ColumnHashPartitioner(file[wrongline], npartitions, &pctx));
     RowPrinter(file[wrongline]);
 }
 
@@ -48,9 +48,18 @@ int *populate_partitions(char **filename, int numfiles, int numlines, int nparti
     for (int i = 0; i < numfiles; i++)
     {
         FILE *f = fopen(filename[i], "r");
+        if (!f) {
+            printf("failed to open file %s\n", filename[i]);
+            exit(1);
+        }
         for (int j = 0; j < numlines; j++)
         {
-            int hash = ColumnHashPartitioner(SplitCols(GetLines(f)), npartitions, &pctx);
+            void * line = GetLines(f);
+            if (!line) {
+                printf("not enough line in file %s\n", filename[i]);
+                exit(1);
+            }
+            int hash = ColumnHashPartitioner(SplitCols(line), npartitions, &pctx);
             ret[hash]++;
         }
     }
@@ -65,7 +74,6 @@ int check_counts(int *refcnt, struct row **file, int filesize, int lineperfile, 
     pctx.keynum = 0;
     for (int i = 0; i < filesize * lineperfile; i++)
     {
-        struct row *row = file[i];
         int hash = ColumnHashPartitioner(file[i], npartitions, &pctx);
         curcnt[hash]++;
     }
@@ -89,8 +97,6 @@ int main()
 
     char *filenames[NUMFILES];
 
-    struct colpart_ctx pctx;
-    pctx.keynum = 0;
 
     for (int i = 0; i < NUMFILES / 2; i++)
     {
@@ -102,7 +108,12 @@ int main()
     struct row **file1 = calloc(1024 * 512, sizeof(struct row *));
     for (int i = 0; i < 512 * 1024; i++)
     {
-        file1[i] = SplitCols(GetLines(stdin));
+        void * line = GetLines(stdin);
+        if (!line) {
+            printf("not enough output from 19.tmp\n");
+            exit(1);
+        }
+        file1[i] = SplitCols(line);
     }
     int file1res = checker(file1, 512, 1024, 53);
     if (file1res)

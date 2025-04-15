@@ -584,9 +584,9 @@ pass all the open testcases.
 - **Due Date** by April 15, 2025 at 11:59 PM 
 - Questions: We will be using Piazza for all questions.
 - Collaboration: You may work with a partner for this project. If you
-  do, you will also submit a partners.txt file with the cslogins of
+  do, you will also submit a partners.csv file with the cslogins of
   both individuals in your group when you turn in the project in the
-  top-level directory of your submission (just like slipdays.) Copying
+  top-level directory of your submission (just like slipdays.). Make sure partners.csv is in a valid csv format. Copying
   code (from other groups) is considered cheating. [Read
   this](http://pages.cs.wisc.edu/~remzi/Classes/537/Spring2018/dontcheat.html)
   for more info on what is OK and what is not. Please help us all have
@@ -622,7 +622,7 @@ pass all the open testcases.
   ├─ tests/
   ├─ ...
   ├─ slipdays.txt
-  ├─ partners.txt
+  ├─ partners.csv
   ```
   - We will track your slip days and late submissions from project to
     project and begin to deduct percentages after you have used up

@@ -36,5 +36,5 @@ $(LIB_DIR)/%.o: $(LIB_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
 clean:
-	rm -f $(BINARIES) $(APP_DIR/*.o) $(SOL_DIR)/*.o $(LIB_DIR)/*.o $(SOL_DIR)/*.a
+	rm -f $(BINARIES) $(APP_DIR)/*.o $(SOL_DIR)/*.o $(LIB_DIR)/*.o $(SOL_DIR)/*.a
 	rm -rf $(BIN_DIR)

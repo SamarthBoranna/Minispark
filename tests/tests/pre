@@ -1,3 +1,1 @@
-make -C ../ solution/libminispark.a
-make -C ./tests clean
 make -C ./tests all

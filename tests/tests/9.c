@@ -15,5 +15,12 @@ int main(int argc, char* argv[]) {
   printf("found %d matches\n", matches);
 
   MS_TearDown();
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

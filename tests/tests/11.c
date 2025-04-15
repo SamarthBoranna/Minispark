@@ -7,7 +7,10 @@
 #include "lib.h"
 #include "minispark.h"
 
-int main(int argc, char* argv[]) {
+int main() {
+
+  measureNumNops();
+
   struct timeval start, end;
 
   cpu_set_t set;
@@ -43,11 +46,21 @@ int main(int argc, char* argv[]) {
   long microseconds = end.tv_usec - start.tv_usec;
   double elapsed = seconds + microseconds * 1e-6;
 
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
+
+
   // Check if it scales. 
-  double predict = (3*10 / cpu_cnt)+1;
-  if (elapsed < predict)
+  double predict = ((3*2*10.0)/ (cpu_cnt-1))+3;
+  if (elapsed < 1) {
+    printf("Too fast! Are you evaluating before count()?");
+  }else if (elapsed < predict)
     printf("ok");
-  else
+  else 
     printf("Too slow. elapsed %.2f predict %.2f\n", elapsed, predict);
 
   for (int i=0; i< 1000; i++) {

@@ -41,4 +41,12 @@ int main(int argc, char* argv[]) {
     print(join(repart1, repart2, SumJoin, (void*)&sctx), RowPrinter);
   }
   MS_TearDown();
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
+  return 0;
 }

@@ -14,8 +14,8 @@ def check_line(line: str):
         return False, 0
 def check():
     f = open('metrics.log')
-    cnt = [0,0,0,0]
-    ans = [32, 0, 64, 32]
+    cnt = [0,0,0,0,0]
+    ans = [32, 0, 64, 2, 0]
 
     for line in f:
         r, t = check_line(line)
@@ -23,6 +23,7 @@ def check():
             print("log format mismatch")
             return
         cnt[t] += 1
+    cnt[0] += cnt[4]
     for idx, i in enumerate(cnt):
         if ans[idx] > i:
             print(f"too small job allocated : trans type {idx}, should be larger than {ans[idx]}, but only {i}")

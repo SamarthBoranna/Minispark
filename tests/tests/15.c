@@ -10,7 +10,7 @@
 #define ROUNDS 9
 #define NUMFILES (1<<ROUNDS)
 
-int main(int argc, char* argv[]) {
+int main() {
   
   MS_Run();
 
@@ -36,5 +36,12 @@ int main(int argc, char* argv[]) {
 
   MS_TearDown();
 
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

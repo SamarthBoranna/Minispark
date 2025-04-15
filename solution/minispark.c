@@ -46,6 +46,7 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   rdd->trans = t;
   rdd->fn = fn;
   rdd->partitions = NULL;
+  rdd->numpartitions = maxpartitions;
   rdd->materialized = 0;
   return rdd;
 }
@@ -105,6 +106,7 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
   }
 
   rdd->numdependencies = 0;
+  rdd->numpartitions = numfiles;
   rdd->trans = MAP;
   rdd->fn = (void *)identity;
   return rdd;
@@ -156,14 +158,7 @@ void execute(RDD* rdd) {
     task->pnum = i;
 
     // add the tasks to the task queue 
-    pthread_mutex_lock(&global_pool->work_lock);
-    push(global_pool->queue, task);
-    pthread_mutex_unlock(&global_pool->work_lock);
-
-    // signal workers of new work
-    pthread_mutex_lock(&global_pool->work_lock);
-    pthread_cond_signal(&global_pool->toBeDone);
-    pthread_mutex_unlock(&global_pool->work_lock);
+    thread_pool_submit(global_pool, task);
   }
 
   thread_pool_wait();
@@ -316,9 +311,10 @@ int count(RDD *rdd) {
 
 void print(RDD *rdd, Printer p) {
   execute(rdd);
-
+  thread_pool_wait();
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
+  printf("%d\n", rdd->partitions->size); 
   for (int i = 0; i < rdd->partitions->size; i++) {
     node* partition_node = getList(rdd->partitions, i);
     List* partition = partition_node->data;
@@ -476,6 +472,7 @@ void *worker(void *argument){
     if(taskToBeDone != NULL){
       materialize(taskToBeDone->rdd, taskToBeDone->pnum);
       pthread_mutex_lock(&tpool->work_lock);
+
       tpool->activeTasks -= 1;
       if(queue->size == 0 && tpool->activeTasks == 0){
         pthread_cond_signal(&tpool->waiting);
@@ -529,11 +526,13 @@ void thread_pool_destroy(){
   pthread_cond_broadcast(&global_pool->toBeDone);
   pthread_mutex_unlock(&global_pool->work_lock);
 
+  printf("Start Destroy\n"); 
   for(int i = 0; i<global_pool->numThreads; i++){
     pthread_join(global_pool->threads[i], NULL);
+    printf("%d\n", i); 
     //error?
   }
-
+  printf("Finish Thread\n");
   TaskQueue *queue = global_pool->queue;
   freeQueue(queue->head);
   free(global_pool->queue);
@@ -551,7 +550,6 @@ void thread_pool_wait(){
   while(queue->size != 0 || global_pool->activeTasks != 0){
     pthread_cond_wait(&global_pool->waiting, &global_pool->work_lock);
   }
-  pthread_cond_signal(&global_pool->waiting);
   pthread_mutex_unlock(&global_pool->work_lock);
 }
 

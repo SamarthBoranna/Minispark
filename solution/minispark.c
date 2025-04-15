@@ -124,6 +124,8 @@ void execute(RDD* rdd) {
 }
 
 void MS_Run() {
+  
+  global_pool = initThreadPool()
   return;
 }
 

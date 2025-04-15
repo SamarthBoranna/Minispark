@@ -153,7 +153,9 @@ void execute(RDD* rdd) {
     task->pnum = i;
     // add the tasks to the task queue 
 
+    // LOCK
     push(taskQueue, task) // need to initialize queue
+    // UNLOCK
   }
 
   rdd->materialized = 1;
@@ -165,7 +167,7 @@ void materialize(RDD* rdd, int pnum) {
   List* partition = partition_node->data;
 
   switch (rdd->trans) {
-    case MAP:
+    case MAP: {
       if (rdd->numdependencies > 0) {
         RDD* dep = rdd->dependencies[0];
         node* dep_partition_node = getList(dep->partitions, pnum);
@@ -186,8 +188,9 @@ void materialize(RDD* rdd, int pnum) {
       }
       // Otherwise its a FILE-BACKED RDD
       break;
+    }
 
-    case FILTER:
+    case FILTER: {
       RDD* dep = rdd->dependencies[0];
       node* dep_partition_node = getList(dep->partitions, pnum);
       List* dep_partition = dep_partition_node->data;
@@ -205,11 +208,62 @@ void materialize(RDD* rdd, int pnum) {
         curr = nextList(curr);
       }
       break;
+    }
 
-    case JOIN:
-    
-    case PARTITIONBY:
-      
+    case JOIN: {
+      RDD* dep1 = rdd->dependencies[0];
+      node* dep1_partition_node = getList(dep1->partitions, pnum);
+      List* dep1_partition = dep1_partition_node->data;
+
+      RDD* dep2 = rdd->dependencies[1];
+      node* dep2_partition_node = getList(dep2->partitions, pnum);
+      List* dep2_partition = dep2_partition_node->data;
+
+      Joiner join_fn = (Joiner)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply inner join
+      node* curr1 = seek_from_start(dep1_partition);
+      while (curr1 != NULL) {
+        node* curr2 = seek_from_start(dep2_partition);
+        while (curr2 != NULL) {
+          void* result = join_fn(curr1->data, curr2->data, ctx);
+          if (result != NULL) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = result;
+            append(partition, new_node);
+          }
+          curr2 = nextList(curr2);
+        }
+        curr1 = nextList(curr1);
+      }
+      break;
+    }
+
+    case PARTITIONBY: {
+      RDD* dep = rdd->dependencies[0];
+      Partitioner partitioner_fn = (Partitioner)rdd->fn;
+      void* ctx = rdd->ctx;
+
+      // Apply partition function
+      for (int i = 0; i < dep->partitions->size; i++) {
+        node* dep_partition_node = getList(dep->partitions, i);
+        List* dep_partition = dep_partition_node->data;
+        
+        node* curr = seek_from_start(dep_partition);
+        while (curr != NULL) {
+          // Make sure to partition number matches
+          unsigned long result_partition = partitioner_fn(curr->data, rdd->numpartitions, ctx);          
+          if (result_partition == pnum) {
+            node* new_node = malloc(sizeof(node));
+            new_node->data = curr->data;
+            append(partition, new_node);
+          }
+          curr = nextList(curr);
+        }
+      }
+      break;
+    }
   }
 }
 

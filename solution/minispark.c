@@ -151,15 +151,20 @@ void execute(RDD* rdd) {
     Task* task = malloc(sizeof(Task));
     task->rdd = rdd;
     task->pnum = i;
-    // add the tasks to the task queue 
 
-    // LOCK
-    push(taskQueue, task) // need to initialize queue
-    // UNLOCK
+    // add the tasks to the task queue 
+    pthread_mutex_lock(&global_pool->queue->lock);
+    push(global_pool->queue, task);
+    pthread_mutex_unlock(&global_pool->queue->lock);
+
+    // signal workers of new work
+    pthread_mutex_lock(&global_pool->work_lock);
+    pthread_cond_signal(&global_pool->toBeDone);
+    pthread_mutex_unlock(&global_pool->work_lock);
   }
 
+  thread_pool_wait();
   rdd->materialized = 1;
-  return;
 }
 
 void materialize(RDD* rdd, int pnum) {

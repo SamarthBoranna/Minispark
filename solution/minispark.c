@@ -285,6 +285,11 @@ int count(RDD *rdd) {
 
   int count = 0;
   // count all the items in rdd
+  for(int i = 0; i < rdd->partitions->size; i++) {
+    node* partition_node = getList(rdd->partitions, i);
+    List* partition = partition_node->data;
+    count += partition->size;
+  }
   return count;
 }
 
@@ -293,4 +298,13 @@ void print(RDD *rdd, Printer p) {
 
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
+  for (int i = 0; i < rdd->partitions->size; i++) {
+    node* partition_node = getList(rdd->partitions, i);
+    List* partition = partition_node->data;
+    node* curr = seek_from_start(partition);
+    while (curr != NULL) {
+      p(curr->data);
+      curr = nextList(curr);
+    }
+  }
 }

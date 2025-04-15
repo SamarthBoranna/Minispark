@@ -291,9 +291,6 @@ void MS_Run() {
   int numthreads = CPU_COUNT(&set);
 
   global_pool = initThreadPool(numthreads);
-  TaskQueue *queue = malloc(sizeof(TaskQueue));
-  initQueue(queue);
-  global_pool->queue = queue;
   return;
 }
 
@@ -477,16 +474,14 @@ void *worker(void *argument){
     pthread_mutex_unlock(&tpool->work_lock);
 
     if(taskToBeDone != NULL){
+      materialize(taskToBeDone->rdd, taskToBeDone->pnum);
       pthread_mutex_lock(&tpool->work_lock);
-      Task *currTask = queue->head;
-      RDD *rddToDo = currTask->rdd;
-      int pnum = currTask->pnum;
-      materialize(rddToDo, pnum);
       tpool->activeTasks -= 1;
       if(queue->size == 0 && tpool->activeTasks == 0){
         pthread_cond_signal(&tpool->waiting);
       }
       pthread_mutex_unlock(&tpool->work_lock);
+      free(taskToBeDone);
     }
   }
   return NULL;

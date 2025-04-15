@@ -1,10 +1,12 @@
 #ifndef __minispark_h__
 #define __minispark_h__
+#define _GNU_SOURCE
 
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <sched.h>
 
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
@@ -32,7 +34,7 @@ typedef enum {
   FILE_BACKED
 } Transform;
 
-typedef struct{
+typedef struct node{
   void *data;
   struct node *next;
 }node;
@@ -58,25 +60,6 @@ struct RDD {
   // you may want extra data members here
 };
 
-typedef struct{
-  pthread_t *threads;
-  int numThreads;
-  struct TaskQueue *queue;
-  int stop;
-  pthread_mutex_t work_lock;
-  pthread_cond_t toBeDone;
-  pthread_cond_t waiting;
-  pthread_t metricThread;
-  int activeTasks;
-}ThreadPool;
-
-typedef struct{
-  struct Task *head;
-  struct Task *tail;
-  int size;
-  pthread_mutex_t lock;
-}TaskQueue;
-
 typedef struct {
   struct timespec created;
   struct timespec scheduled;
@@ -85,12 +68,31 @@ typedef struct {
   int pnum;
 } TaskMetric;
 
-typedef struct { //
+typedef struct Task{ //
   RDD* rdd;
   int pnum;
   TaskMetric* metric;
   struct Task *next;
 } Task;
+
+typedef struct{
+  struct Task *head;
+  struct Task *tail;
+  int size;
+  pthread_mutex_t lock;
+}TaskQueue;
+
+typedef struct{
+  pthread_t *threads;
+  int numThreads;
+  TaskQueue *queue;
+  int stop;
+  pthread_mutex_t work_lock;
+  pthread_cond_t toBeDone;
+  pthread_cond_t waiting;
+  pthread_t metricThread;
+  int activeTasks;
+}ThreadPool;
 
 //////// actions ////////
 
@@ -143,10 +145,11 @@ void MS_TearDown();
 void initQueue(TaskQueue* queue);
 Task *pop(TaskQueue *queue);
 int push(TaskQueue *queue, Task *taskToPush);
+void freeQueue(Task *head);
 
 /*List Functions*/
-List *initList(List *list);
-int append(List *list, node *new_node);
+List *list_init(List *list);
+int append(List *list, void *new_node);
 node *getList(List *list, int index);
 node *nextList(node *curr_node);
 node *seek_from_start(List *list);

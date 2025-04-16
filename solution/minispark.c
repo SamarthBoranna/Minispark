@@ -38,7 +38,7 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   {
     RDD *dep = va_arg(args, RDD *);
     rdd->dependencies[i] = dep;
-    maxpartitions = max(maxpartitions, dep->partitions->size);
+    maxpartitions = max(maxpartitions, dep->numpartitions);
   }
   va_end(args);
 
@@ -67,8 +67,6 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
 RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 {
   RDD *rdd = create_rdd(1, PARTITIONBY, fn, dep);
-  List* list = malloc(sizeof(List));
-  rdd->partitions = list_init(list);
   rdd->numpartitions = numpartitions;
   rdd->ctx = ctx;
   return rdd;
@@ -489,42 +487,6 @@ void freeRDD(RDD *rdd){
 
 //////// Thread Pool Actions ////////
 
-/*
-void *worker(void *argument){
-  ThreadPool *tpool = (ThreadPool *)argument;
-
-  while(1){
-    pthread_mutex_lock(&tpool->work_lock);
-    TaskQueue *queue = tpool->queue;
-    while(queue->size == 0 && tpool->stop == 0){
-      pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
-    }
-
-    if(tpool->stop && queue->head == NULL){
-      pthread_mutex_unlock(&tpool->work_lock);
-      break;
-    }
-
-    Task *taskToBeDone = pop(queue);
-    tpool->activeTasks += 1;
-    pthread_mutex_unlock(&tpool->work_lock);
-
-    if(taskToBeDone != NULL){
-      materialize(taskToBeDone->rdd, taskToBeDone->pnum);
-      free(taskToBeDone);
-
-      pthread_mutex_lock(&tpool->work_lock);
-      tpool->activeTasks -= 1;
-      if(queue->size == 0 && tpool->activeTasks == 0){
-        pthread_cond_signal(&tpool->waiting);
-      }
-      pthread_mutex_unlock(&tpool->work_lock);
-    }
-  }
-  return NULL;
-}
-  */
-
 void *worker(void *arg){
   ThreadPool *tpool = arg;
   while (1) {
@@ -643,14 +605,3 @@ int thread_pool_submit(ThreadPool *tpool, Task *task) {
   return 0;
 }
 
-/*
-int thread_pool_submit(ThreadPool* tpool, Task* task){
-  int push_val = push(tpool->queue, task);
-  if(push_val == 0){
-    pthread_mutex_lock(&tpool->work_lock);
-    pthread_cond_signal(&tpool->toBeDone);
-    pthread_mutex_unlock(&tpool->work_lock);
-  }
-  return push_val;
-}
-*/

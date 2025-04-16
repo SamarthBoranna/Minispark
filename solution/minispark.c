@@ -1,7 +1,5 @@
 #include "minispark.h"
 #define _GNU_SOURCE
-
-
 static ThreadPool *global_pool = NULL;
 
 // Working with metrics...
@@ -89,42 +87,26 @@ void *identity(void *arg)
   return arg;
 }
 
+void* file_line_reader(void* arg) {
+  FILE *fp = (FILE*) arg;
+  char *line = NULL;
+  size_t len = 0;
+  
+  ssize_t read = getline(&line, &len, fp);
+  if (read == -1) {
+      free(line);
+      fprintf(stderr, "file_line_reader: EOF reached\n");
+      return NULL;
+  }
+  fprintf(stderr, "file_line_reader: read line: \"%s\"\n", line);
+  if (read > 0 && line[read - 1] == '\n') {
+      line[read - 1] = '\0';
+  }
+  return (void*) line;
+}
+
 /* Special RDD constructor.
  * By convention, this is how we read from input files. */
-/*
-RDD *RDDFromFiles(char **filenames, int numfiles)
-{
-  RDD *rdd = malloc(sizeof(RDD));
-  List* list = malloc(sizeof(List));
-  rdd->partitions = list_init(list);
-
-  for (int i = 0; i < numfiles; i++)
-  {
-    FILE *fp = fopen(filenames[i], "r");
-    if (fp == NULL) {
-      perror("fopen");
-      exit(1);
-    }
-
-    node* file_node = malloc(sizeof(node));
-    if (file_node == NULL) {
-      perror("malloc");
-      fclose(fp);
-      exit(1);
-    }
-    file_node->data = fp;
-    append(rdd->partitions, file_node);
-  }
-
-  rdd->numdependencies = 0;
-  rdd->numpartitions = numfiles;
-  rdd->trans = FILE_BACKED;
-  rdd->fn = (void *)identity;
-  rdd->ctx = NULL;
-  return rdd;
-}
-*/
-
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
@@ -157,10 +139,9 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
   rdd->numdependencies = 0;
   rdd->numpartitions = numfiles;
   rdd->trans = FILE_BACKED;  //might have to switch to FILE_BACKED and have switch case in materialize
-  rdd->fn = (void *)identity;
+  rdd->fn = (void *)file_line_reader;
   return rdd;
 }
-
 
 void execute(RDD* rdd) {
 
@@ -284,7 +265,7 @@ void materialize(RDD* rdd, int pnum) {
       }
       fclose(fp);
       break;
-    }
+  }
 
     case FILTER: {
       RDD* dep = rdd->dependencies[0];
@@ -372,7 +353,7 @@ void MS_Run() {
     exit(1);
   }
 
-  int numthreads = 1; //CPU_COUNT(&set);
+  int numthreads = CPU_COUNT(&set);
 
   global_pool = initThreadPool(numthreads);
   return;
@@ -402,7 +383,6 @@ void print(RDD *rdd, Printer p) {
   execute(rdd);
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
-  printf("%d\n", rdd->partitions->size); 
   for (int i = 0; i < rdd->partitions->size; i++) {
     node* partition_node = getList(rdd->partitions, i);
     List* partition = (List *)partition_node->data;
@@ -479,9 +459,10 @@ void initQueue(TaskQueue* queue) {
   queue->head = NULL;
   queue->tail = NULL;
   queue->size = 0;
-  pthread_mutex_init(&queue->lock, NULL);
+  //pthread_mutex_init(&queue->lock, NULL);
 }
 
+/*
 Task *pop(TaskQueue *queue){
   pthread_mutex_lock(&queue->lock);
   if(queue == NULL || queue->head == NULL){
@@ -515,6 +496,7 @@ int push(TaskQueue *queue, Task *taskToPush){
   pthread_mutex_unlock(&queue->lock);
   return 0;
 }
+*/
 
 void freeQueue(Task *head) {
   Task *current = head;
@@ -538,6 +520,7 @@ void freeRDD(RDD *rdd){
 
 //////// Thread Pool Actions ////////
 
+/*
 void *worker(void *argument){
   ThreadPool *tpool = (ThreadPool *)argument;
 
@@ -559,15 +542,51 @@ void *worker(void *argument){
 
     if(taskToBeDone != NULL){
       materialize(taskToBeDone->rdd, taskToBeDone->pnum);
-      pthread_mutex_lock(&tpool->work_lock);
+      free(taskToBeDone);
 
+      pthread_mutex_lock(&tpool->work_lock);
       tpool->activeTasks -= 1;
       if(queue->size == 0 && tpool->activeTasks == 0){
         pthread_cond_signal(&tpool->waiting);
       }
       pthread_mutex_unlock(&tpool->work_lock);
-      free(taskToBeDone);
     }
+  }
+  return NULL;
+}
+  */
+
+void *worker(void *arg){
+  ThreadPool *tpool = arg;
+  while (1) {
+    pthread_mutex_lock(&tpool->work_lock);
+      /* wait for work or shutdown */
+      while (tpool->queue->size == 0 && !tpool->stop) {
+        pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
+      }
+      /* time to exit? */
+      if (tpool->stop) {
+        pthread_mutex_unlock(&tpool->work_lock);
+        break;
+      }
+      /* pop one task */
+      Task *task = tpool->queue->head;
+      tpool->queue->head = task->next;
+      if (tpool->queue->head == NULL)
+        tpool->queue->tail = NULL;
+      tpool->queue->size--;
+      tpool->activeTasks++;
+    pthread_mutex_unlock(&tpool->work_lock);
+
+    /* actually do the work */
+    materialize(task->rdd, task->pnum);
+    free(task);
+
+    pthread_mutex_lock(&tpool->work_lock);
+      tpool->activeTasks--;
+      if (tpool->queue->size == 0 && tpool->activeTasks == 0)
+        pthread_cond_signal(&tpool->waiting);
+    pthread_mutex_unlock(&tpool->work_lock);
   }
   return NULL;
 }
@@ -581,6 +600,7 @@ ThreadPool *initThreadPool(int numthreads){
 
   tpool->numThreads = numthreads;
   tpool->stop = 0;
+  tpool->activeTasks = 0;
 
   tpool->threads = malloc(numthreads * sizeof(pthread_t));
   if(tpool->threads == NULL){
@@ -595,14 +615,12 @@ ThreadPool *initThreadPool(int numthreads){
   }
   initQueue(tpool->queue);
   pthread_mutex_init(&tpool->work_lock, NULL);
+  pthread_cond_init(&tpool->toBeDone, NULL);
+  pthread_cond_init(&tpool->waiting, NULL); 
 
   for(int i = 0; i<numthreads; i++){
     pthread_create(&tpool->threads[i], NULL, worker, tpool);
   }
-
-  pthread_cond_init(&tpool->toBeDone, NULL);
-  pthread_cond_init(&tpool->waiting, NULL); 
-  tpool->activeTasks = 0;
 
   return tpool;
 }
@@ -613,14 +631,11 @@ void thread_pool_destroy(){
   global_pool->stop = 1;
   pthread_cond_broadcast(&global_pool->toBeDone);
   pthread_mutex_unlock(&global_pool->work_lock);
-
-  printf("Start Destroy\n"); 
+ 
   for(int i = 0; i<global_pool->numThreads; i++){
     pthread_join(global_pool->threads[i], NULL);
-    printf("%d\n", i); 
     //error?
   }
-  printf("Finish Thread\n");
   TaskQueue *queue = global_pool->queue;
   freeQueue(queue->head);
   free(global_pool->queue);
@@ -635,12 +650,31 @@ void thread_pool_destroy(){
 void thread_pool_wait(){
   pthread_mutex_lock(&global_pool->work_lock);
   TaskQueue *queue = global_pool->queue;
-  while(queue->size != 0 || global_pool->activeTasks != 0){
+  while(queue->size > 0 || global_pool->activeTasks > 0){
     pthread_cond_wait(&global_pool->waiting, &global_pool->work_lock);
   }
   pthread_mutex_unlock(&global_pool->work_lock);
 }
 
+int thread_pool_submit(ThreadPool *tpool, Task *task) {
+  pthread_mutex_lock(&tpool->work_lock);
+
+  task->next = NULL;
+  if (tpool->queue->head == NULL) {
+    tpool->queue->head = task;
+    tpool->queue->tail = task;
+  } else {
+    tpool->queue->tail->next = task;
+    tpool->queue->tail = task;
+  }
+  tpool->queue->size++;
+
+  pthread_cond_signal(&tpool->toBeDone);
+  pthread_mutex_unlock(&tpool->work_lock);
+  return 0;
+}
+
+/*
 int thread_pool_submit(ThreadPool* tpool, Task* task){
   int push_val = push(tpool->queue, task);
   if(push_val == 0){
@@ -650,3 +684,4 @@ int thread_pool_submit(ThreadPool* tpool, Task* task){
   }
   return push_val;
 }
+*/

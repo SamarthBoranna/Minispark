@@ -79,7 +79,7 @@ typedef struct{
   struct Task *head;
   struct Task *tail;
   int size;
-  pthread_mutex_t lock;
+  //pthread_mutex_t lock;
 }TaskQueue;
 
 typedef struct{
@@ -143,8 +143,8 @@ void MS_TearDown();
 
 /*Task Queue Functions*/
 void initQueue(TaskQueue* queue);
-Task *pop(TaskQueue *queue);
-int push(TaskQueue *queue, Task *taskToPush);
+//Task *pop(TaskQueue *queue);
+//int push(TaskQueue *queue, Task *taskToPush);
 void freeQueue(Task *head);
 
 /*List Functions*/

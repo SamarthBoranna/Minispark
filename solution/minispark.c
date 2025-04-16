@@ -1,5 +1,5 @@
 #include "minispark.h"
-
+#define _GNU_SOURCE
 static ThreadPool *global_pool = NULL;
 
 // Working with metrics...
@@ -152,21 +152,37 @@ void execute(RDD* rdd) {
   // Init partitions
   if (rdd->partitions == NULL) {
     List* list = malloc(sizeof(List));
+    if (list == NULL) {
+      perror("malloc");
+      exit(1);
+    }
     rdd->partitions = list_init(list); 
     
     // Initialize each partition as an empty list??
     for (int i = 0; i < num_partitions; i++) {
       List* partition = malloc(sizeof(List));
+      if (partition == NULL) {
+        perror("malloc");
+        exit(1);
+      }
       list_init(partition);
 
       node* partition_node = malloc(sizeof(node));
+      if (partition_node == NULL) {
+        perror("malloc");
+        exit(1);
+      }
       partition_node->data=partition;
       append(rdd->partitions, partition_node);
     }
   }
 
-  for (int i = 0; i < rdd->numpartitions; i++) {
+  for (int i = 0; i < num_partitions; i++) {
     Task* task = malloc(sizeof(Task));
+    if (task == NULL) {
+      perror("malloc");
+      exit(1);
+    }
     task->rdd = rdd;
     task->pnum = i;
 
@@ -180,7 +196,7 @@ void execute(RDD* rdd) {
 
 void materialize(RDD* rdd, int pnum) {
   node* partition_node = getList(rdd->partitions, pnum);
-  List* partition = (List *)partition_node->data;
+  List* partition = (List *)partition_node->data; 
 
   switch (rdd->trans) {
     case MAP: {
@@ -306,7 +322,7 @@ void MS_Run() {
     exit(1);
   }
 
-  int numthreads = 1; //CPU_COUNT(&set);
+  int numthreads = CPU_COUNT(&set);
 
   global_pool = initThreadPool(numthreads);
   return;
@@ -484,7 +500,7 @@ void *worker(void *argument){
       pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
     }
 
-    if(tpool->stop){
+    if(tpool->stop && queue->head == NULL){
       pthread_mutex_unlock(&tpool->work_lock);
       break;
     }

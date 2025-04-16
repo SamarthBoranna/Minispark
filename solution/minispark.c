@@ -1,4 +1,6 @@
 #include "minispark.h"
+#define _GNU_SOURCE
+
 
 static ThreadPool *global_pool = NULL;
 
@@ -89,6 +91,7 @@ void *identity(void *arg)
 
 /* Special RDD constructor.
  * By convention, this is how we read from input files. */
+/*
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
@@ -102,15 +105,62 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
       perror("fopen");
       exit(1);
     }
-    append(rdd->partitions, fp);
+
+    node* file_node = malloc(sizeof(node));
+    if (file_node == NULL) {
+      perror("malloc");
+      fclose(fp);
+      exit(1);
+    }
+    file_node->data = fp;
+    append(rdd->partitions, file_node);
   }
 
   rdd->numdependencies = 0;
   rdd->numpartitions = numfiles;
-  rdd->trans = MAP;
+  rdd->trans = FILE_BACKED;
+  rdd->fn = (void *)identity;
+  rdd->ctx = NULL;
+  return rdd;
+}
+*/
+
+RDD *RDDFromFiles(char **filenames, int numfiles)
+{
+  RDD *rdd = malloc(sizeof(RDD));
+  List* list = malloc(sizeof(List));
+  rdd->partitions = list_init(list);
+
+  for (int i = 0; i < numfiles; i++) {
+    FILE *fp = fopen(filenames[i], "r");
+    if (fp == NULL) {
+      perror("fopen");
+      exit(1);
+    }
+
+    List* inner_list = malloc(sizeof(List));
+    inner_list = list_init(inner_list);
+    node* file_node = malloc(sizeof(node));
+    if (file_node == NULL) {
+      perror("malloc");
+      fclose(fp);
+      exit(1);
+    }
+    file_node->data = fp;
+    append(inner_list, file_node);
+
+    node *part_node = malloc(sizeof(node));
+    part_node->data = inner_list;
+    append(rdd->partitions, part_node);
+  }
+
+  rdd->numdependencies = 0;
+  rdd->numpartitions = numfiles;
+  rdd->trans = FILE_BACKED;  //might have to switch to FILE_BACKED and have switch case in materialize
   rdd->fn = (void *)identity;
   return rdd;
 }
+
 
 void execute(RDD* rdd) {
 
@@ -139,21 +189,37 @@ void execute(RDD* rdd) {
   // Init partitions
   if (rdd->partitions == NULL) {
     List* list = malloc(sizeof(List));
+    if (list == NULL) {
+      perror("malloc");
+      exit(1);
+    }
     rdd->partitions = list_init(list); 
     
     // Initialize each partition as an empty list??
     for (int i = 0; i < num_partitions; i++) {
       List* partition = malloc(sizeof(List));
+      if (partition == NULL) {
+        perror("malloc");
+        exit(1);
+      }
       list_init(partition);
 
       node* partition_node = malloc(sizeof(node));
+      if (partition_node == NULL) {
+        perror("malloc");
+        exit(1);
+      }
       partition_node->data=partition;
       append(rdd->partitions, partition_node);
     }
   }
 
-  for (int i = 0; i < rdd->numpartitions; i++) {
+  for (int i = 0; i < num_partitions; i++) {
     Task* task = malloc(sizeof(Task));
+    if (task == NULL) {
+      perror("malloc");
+      exit(1);
+    }
     task->rdd = rdd;
     task->pnum = i;
 
@@ -167,7 +233,7 @@ void execute(RDD* rdd) {
 
 void materialize(RDD* rdd, int pnum) {
   node* partition_node = getList(rdd->partitions, pnum);
-  List* partition = (List *)partition_node->data;
+  List* partition = (List *)partition_node->data; 
 
   switch (rdd->trans) {
     case MAP: {
@@ -194,6 +260,29 @@ void materialize(RDD* rdd, int pnum) {
     }
 
     case FILE_BACKED: {
+      node* file_node = seek_from_start(partition);
+      if (file_node == NULL) {
+          break;
+      }
+      FILE *fp = (FILE*) file_node->data;
+      if (fp == NULL) {
+          break;
+      }
+      
+      file_node->data = NULL;
+      
+      Mapper map_fn = (Mapper) rdd->fn;
+      void* result = NULL;
+      while ((result = map_fn(fp)) != NULL) {
+          node* new_node = malloc(sizeof(node));
+          if (new_node == NULL) {
+              perror("malloc");
+              break;
+          }
+          new_node->data = result;
+          append(partition, new_node);
+      }
+      fclose(fp);
       break;
     }
 
@@ -283,7 +372,7 @@ void MS_Run() {
     exit(1);
   }
 
-  int numthreads = CPU_COUNT(&set);
+  int numthreads = 1; //CPU_COUNT(&set);
 
   global_pool = initThreadPool(numthreads);
   return;
@@ -459,7 +548,7 @@ void *worker(void *argument){
       pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
     }
 
-    if(tpool->stop){
+    if(tpool->stop && queue->head == NULL){
       pthread_mutex_unlock(&tpool->work_lock);
       break;
     }

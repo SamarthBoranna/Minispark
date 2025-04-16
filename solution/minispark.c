@@ -87,24 +87,6 @@ void *identity(void *arg)
   return arg;
 }
 
-void* file_line_reader(void* arg) {
-  FILE *fp = (FILE*) arg;
-  char *line = NULL;
-  size_t len = 0;
-  
-  ssize_t read = getline(&line, &len, fp);
-  if (read == -1) {
-      free(line);
-      fprintf(stderr, "file_line_reader: EOF reached\n");
-      return NULL;
-  }
-  fprintf(stderr, "file_line_reader: read line: \"%s\"\n", line);
-  if (read > 0 && line[read - 1] == '\n') {
-      line[read - 1] = '\0';
-  }
-  return (void*) line;
-}
-
 /* Special RDD constructor.
  * By convention, this is how we read from input files. */
 RDD *RDDFromFiles(char **filenames, int numfiles)
@@ -139,7 +121,7 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
   rdd->numdependencies = 0;
   rdd->numpartitions = numfiles;
   rdd->trans = FILE_BACKED;  //might have to switch to FILE_BACKED and have switch case in materialize
-  rdd->fn = (void *)file_line_reader;
+  rdd->fn = (void *)identity;
   return rdd;
 }
 
@@ -212,10 +194,20 @@ void materialize(RDD* rdd, int pnum) {
         node* curr = seek_from_start(dep_partition);
         while (curr != NULL) {
           void* result = map_fn(curr->data);
-          if (result != NULL) {
-            node* new_node = malloc(sizeof(node));
-            new_node->data = result;
-            append(partition, new_node);
+          if(dep->trans == FILE_BACKED){
+            while(result != NULL) {
+              node* new_node = malloc(sizeof(node));
+              new_node->data = result;
+              append(partition, new_node);
+              result = map_fn(curr->data);
+            }
+          }
+          else{
+            if(result != NULL){
+              node* new_node = malloc(sizeof(node));
+              new_node->data = result;
+              append(partition, new_node);
+            }
           }
           curr = nextList(curr);
         }
@@ -225,29 +217,6 @@ void materialize(RDD* rdd, int pnum) {
     }
 
     case FILE_BACKED: {
-      node* file_node = seek_from_start(partition);
-      if (file_node == NULL) {
-          break;
-      }
-      FILE *fp = (FILE*) file_node->data;
-      if (fp == NULL) {
-          break;
-      }
-      
-      file_node->data = NULL;
-      
-      Mapper map_fn = (Mapper) rdd->fn;
-      void* result = NULL;
-      while ((result = map_fn(fp)) != NULL) {
-          node* new_node = malloc(sizeof(node));
-          if (new_node == NULL) {
-              perror("malloc");
-              break;
-          }
-          new_node->data = result;
-          append(partition, new_node);
-      }
-      fclose(fp);
       break;
   }
 

@@ -60,23 +60,25 @@ struct RDD {
   // you may want extra data members here
 };
 
-typedef struct {
+typedef struct TaskMetric{
   struct timespec created;
   struct timespec scheduled;
   size_t duration; // in usec
   RDD* rdd;
   int pnum;
-  struct Task *next;
+  struct TaskMetric *next;
 } TaskMetric;
 
 typedef struct{
-  struct TaskMetric *head;
-  struct TaskMetric *tail;
+  TaskMetric *head;
+  TaskMetric *tail;
   int size;
+  pthread_cond_t TMQ_wait;
+  pthread_mutex_t TMQ_lock;
 }TaskMetricQueue;
 
 
-typedef struct Task{ //
+typedef struct Task{
   RDD* rdd;
   int pnum;
   TaskMetric* metric;
@@ -98,7 +100,6 @@ typedef struct{
   pthread_cond_t toBeDone;
   pthread_cond_t waiting;
   TaskMetricQueue* TMqueue;
-  pthread_t metricThread;
   int activeTasks;
 }ThreadPool;
 

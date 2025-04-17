@@ -432,7 +432,6 @@ void initQueue(TaskQueue* queue) {
   queue->head = NULL;
   queue->tail = NULL;
   queue->size = 0;
-  //pthread_mutex_init(&queue->lock, NULL);
 }
 
 
@@ -464,6 +463,10 @@ TaskMetricQueue *initTMQ(TaskMetricQueue* TMQueue){
   TMQueue->head = NULL;
   TMQueue->tail = NULL;
   TMQueue->size = 0;
+  pthread_cond_init(&TMQueue->TMQ_wait, NULL);
+  pthread_mutex_init(&TMQueue->TMQ_lock, NULL);
+
+  return TMQueue;
 }
 
 TaskMetric *TMQpop(TaskMetricQueue *TMqueue){
@@ -486,7 +489,7 @@ int TMQpush(TaskMetricQueue *TMqueue, TaskMetric *TM_ToPush){
     TMqueue->tail = TM_ToPush;
   }
   else{
-    Task *tail = TMqueue->tail;
+    TaskMetric *tail = TMqueue->tail;
     tail->next = TM_ToPush;
     TMqueue->tail = TM_ToPush;
   }
@@ -509,12 +512,14 @@ void *worker(void *arg){
         pthread_mutex_unlock(&tpool->work_lock);
         break;
       }
+      //POP
       Task *task = tpool->queue->head;
       tpool->queue->head = task->next;
       if (tpool->queue->head == NULL)
         tpool->queue->tail = NULL;
       tpool->queue->size--;
       tpool->activeTasks++;
+      //END POP
 
       // Grab task_metric from Metric queue
       clock_gettime(CLOCK_MONOTONIC, &task->metric->scheduled); // Getting the scheduled time
@@ -528,12 +533,39 @@ void *worker(void *arg){
       clock_gettime(CLOCK_MONOTONIC, &time_complete);
       task->metric->duration = TIME_DIFF_MICROS(task->metric->scheduled, time_complete);
       TMQpush(tpool->TMqueue, task->metric);
+      pthread_cond_signal(&tpool->TMqueue->TMQ_wait);
       
       tpool->activeTasks--;
       if (tpool->queue->size == 0 && tpool->activeTasks == 0)
         pthread_cond_signal(&tpool->waiting);
     pthread_mutex_unlock(&tpool->work_lock);
   }
+  return NULL;
+}
+
+void *monitor(void *arg){
+  TaskMetricQueue *TMQ = arg;
+  pthread_mutex_lock(&TMQ->TMQ_lock);
+  FILE *fp = fopen("metrics.log", "w");
+  if(fp == NULL){
+    fclose(fp);
+    return NULL;
+  }
+  while(1){
+    while((TMQ->head == NULL || TMQ->size == 0) && global_pool->stop == 0){
+      pthread_cond_wait(&TMQ->TMQ_wait, &TMQ->TMQ_lock);
+    }
+    if(global_pool->stop == 1 && TMQ->head == NULL){
+      break;
+    }
+    TaskMetric *tm = TMQpop(TMQ);
+    if(tm != NULL){
+      print_formatted_metric(tm, fp);
+    }
+
+  }
+  fclose(fp);
+  pthread_mutex_unlock(&TMQ->TMQ_lock);
   return NULL;
 }
 
@@ -548,8 +580,7 @@ ThreadPool *initThreadPool(int numthreads){
   tpool->stop = 0;
   tpool->activeTasks = 0;
 
-  tpool->threads = malloc((numthreads-1) * sizeof(pthread_t));
-  tpool->metricThread = malloc(sizeof(pthread_t));
+  tpool->threads = malloc(numthreads * sizeof(pthread_t));
 
   if(tpool->threads == NULL){
     perror("malloc");
@@ -572,7 +603,7 @@ ThreadPool *initThreadPool(int numthreads){
 
   for(int i = 0; i<numthreads; i++){
     if (i == 0) {
-      pthread_create(&tpool->metricThread, NULL, monitor, tpool);
+      pthread_create(&tpool->threads[i], NULL, monitor, tpool->TMqueue);
     }
     else 
       pthread_create(&tpool->threads[i], NULL, worker, tpool);
@@ -586,6 +617,7 @@ void thread_pool_destroy(){
   pthread_mutex_lock(&global_pool->work_lock);
   global_pool->stop = 1;
   pthread_cond_broadcast(&global_pool->toBeDone);
+  pthread_cond_signal(&global_pool->TMqueue->TMQ_wait);
   pthread_mutex_unlock(&global_pool->work_lock);
  
   for(int i = 0; i<global_pool->numThreads; i++){

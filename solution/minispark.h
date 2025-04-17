@@ -1,10 +1,12 @@
 #ifndef __minispark_h__
 #define __minispark_h__
+#define _GNU_SOURCE
 
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <sched.h>
 
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
@@ -32,7 +34,7 @@ typedef enum {
   FILE_BACKED
 } Transform;
 
-typedef struct{
+typedef struct node{
   void *data;
   struct node *next;
 }node;
@@ -53,139 +55,53 @@ struct RDD {
   int numdependencies; // 0, 1, or 2
 
   int numpartitions;
-
   int materialized;
 
   // you may want extra data members here
 };
 
-typedef struct{
-  int numThreads;
-  TaskQueue queue;
-}ThreadPool;
-
-typedef struct{
-  Task *head;
-  Task *tail;
-  int size;
-  pthread_mutex_t lock;
-}TaskQueue;
-
-typedef struct {
+typedef struct TaskMetric{
   struct timespec created;
   struct timespec scheduled;
   size_t duration; // in usec
   RDD* rdd;
   int pnum;
+  struct TaskMetric *next;
 } TaskMetric;
 
-typedef struct { //
+typedef struct{
+  TaskMetric *head;
+  TaskMetric *tail;
+  int size;
+  pthread_cond_t TMQ_wait;
+  pthread_mutex_t TMQ_lock;
+}TaskMetricQueue;
+
+
+typedef struct Task{
   RDD* rdd;
   int pnum;
   TaskMetric* metric;
   struct Task *next;
 } Task;
 
-//////// list actions ////////
+typedef struct{
+  struct Task *head;
+  struct Task *tail;
+  int size;
+}TaskQueue;
 
-List *initList(List *list){
-  list->head = NULL;
-  list->tail = NULL;
-  list->size = 0;
-  return list;
-}
-
-int append(List *list, node *new_node){
-  new_node->next = NULL;
-  if(list->head == NULL){
-    list->head = new_node;
-    list->tail = new_node;
-  }
-  else{
-    node *tail = list->tail;
-    tail->next = new_node;
-    list->tail = new_node;
-  }
-  list->size += 1;
-  return 0;
-}
-
-node *getList(List *list, int index){
-  if(index < 0 || index >= list->size){
-    return NULL;
-  }
-  node *curr = list->head;
-  for(int i = 0; i<index; i++){
-    curr = curr->next;
-  }
-
-  return curr;
-}
-
-node *nextList(node *curr_node){
-  if(curr_node->next == NULL){
-    return NULL;
-  }
-  else return curr_node->next; 
-}
-
-node *seek_from_start(List *list){
-  if(list->head == NULL){
-    return NULL;
-  }
-  return list->head;
-}
-
-void freeList(List *list){
-  while(list->head != NULL){
-    node *curr = list->head;
-    list->head = curr->next;
-    free(curr);
-  }
-  free(list);
-}
-//////// task queue actions ////////
-
-void initQueue(TaskQueue* queue) {
-  queue->head = NULL;
-  queue->tail = NULL;
-  queue->size = 0;
-  pthread_mutex_init(&queue->lock, NULL);
-}
-
-Task *pop(TaskQueue *queue){
-  pthread_mutex_lock(&queue->lock);
-  if(queue == NULL || queue->head == NULL){
-    pthread_mutex_unlock(&queue->lock);
-    return NULL;
-    //error?
-  }
-
-  Task *popped = queue->head;
-  Task *next = popped->next;
-  queue->head = next;
-  queue->size -= 1;
-  pthread_mutex_unlock(&queue->lock);
-
-  return popped;
-}
-
-int push(TaskQueue *queue, Task *taskToPush){
-  taskToPush->next = NULL;
-  pthread_mutex_lock(&queue->lock);
-  if(queue->head == NULL){
-    queue->head = taskToPush;
-    queue->tail = taskToPush;
-  }
-  else{
-    Task *tail = queue->tail;
-    tail->next = taskToPush;
-    queue->tail = taskToPush;
-  }
-  queue->size += 1;
-  pthread_mutex_unlock(&queue->lock);
-  return 0;
-}
+typedef struct{
+  pthread_t *threads;
+  int numThreads;
+  TaskQueue *queue;
+  int stop;
+  pthread_mutex_t work_lock;
+  pthread_cond_t toBeDone;
+  pthread_cond_t waiting;
+  TaskMetricQueue* TMqueue;
+  int activeTasks;
+}ThreadPool;
 
 //////// actions ////////
 
@@ -233,6 +149,29 @@ void MS_Run();
 // Waits for work to be complete, destroys the thread pool, and frees
 // all RDDs allocated during runtime.
 void MS_TearDown();
+
+/*Task Queue Functions*/
+void initQueue(TaskQueue* queue);
+void freeQueue(Task *head);
+
+/*List Functions*/
+List *list_init(List *list);
+int append(List *list, void *new_node);
+node *getList(List *list, int index);
+node *nextList(node *curr_node);
+node *seek_from_start(List *list);
+void freeList(List *list);
+
+/*Task Metric Queue Functions*/
+TaskMetricQueue *initTMQ();
+TaskMetric *TMQpop(TaskMetricQueue *TMqueue);
+int TMQpush(TaskMetricQueue *TMqueue, TaskMetric *TM_ToPush);
+
+/*Thread Pool Functions*/
+ThreadPool *initThreadPool(int numthreads);
+void thread_pool_destroy();
+void thread_pool_wait();
+int thread_pool_submit(ThreadPool* tpool, Task* task);
 
 
 #endif // __minispark_h__

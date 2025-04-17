@@ -185,9 +185,10 @@ void execute(RDD* rdd) {
     task->rdd = rdd;
     task->pnum = i;
     
-    task_metric->rdd = rdd;
-    task_metric->pnum = i;
-    clock_gettime(CLOCK_MONOTONIC, &task_metric->created);
+    task->metric = task_metric;
+    task->metric->rdd = rdd;
+    task->metric->pnum = i;
+    clock_gettime(CLOCK_MONOTONIC, &task->metric->created);
 
     // add the tasks to the task queue 
     thread_pool_submit(global_pool, task);
@@ -516,7 +517,7 @@ void *worker(void *arg){
       tpool->activeTasks++;
 
       // Grab task_metric from Metric queue
-      clock_gettime(CLOCK_MONOTONIC, &task_metric->scheduled); // Getting the scheduled time
+      clock_gettime(CLOCK_MONOTONIC, &task->metric->scheduled); // Getting the scheduled time
     pthread_mutex_unlock(&tpool->work_lock);
 
     materialize(task->rdd, task->pnum);
@@ -525,8 +526,8 @@ void *worker(void *arg){
     pthread_mutex_lock(&tpool->work_lock);
       struct timespec time_complete;
       clock_gettime(CLOCK_MONOTONIC, &time_complete);
-      task_metric->duration = TIME_DIFF_MICROS(task_metric->scheduled, task_metric->time_complete);
-      // push task metric to metrics queue
+      task->metric->duration = TIME_DIFF_MICROS(task->metric->scheduled, time_complete);
+      TMQpush(tpool->TMqueue, task->metric);
       
       tpool->activeTasks--;
       if (tpool->queue->size == 0 && tpool->activeTasks == 0)

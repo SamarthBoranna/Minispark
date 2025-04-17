@@ -177,12 +177,17 @@ void execute(RDD* rdd) {
 
   for (int i = 0; i < num_partitions; i++) {
     Task* task = malloc(sizeof(Task));
+    TaskMetric* task_metric = malloc(sizeof(TaskMetric));
     if (task == NULL) {
       perror("malloc");
       exit(1);
     }
     task->rdd = rdd;
     task->pnum = i;
+    
+    task_metric->rdd = rdd;
+    task_metric->pnum = i;
+    clock_gettime(CLOCK_MONOTONIC, &task_metric->created);
 
     // add the tasks to the task queue 
     thread_pool_submit(global_pool, task);
@@ -489,6 +494,7 @@ void freeRDD(RDD *rdd){
 
 void *worker(void *arg){
   ThreadPool *tpool = arg;
+
   while (1) {
     pthread_mutex_lock(&tpool->work_lock);
       /* wait for work or shutdown */
@@ -507,6 +513,9 @@ void *worker(void *arg){
         tpool->queue->tail = NULL;
       tpool->queue->size--;
       tpool->activeTasks++;
+
+      // Grab task_metric from Metric queue
+      clock_gettime(CLOCK_MONOTONIC, &task_metric->scheduled); // Getting the scheduled time
     pthread_mutex_unlock(&tpool->work_lock);
 
     /* actually do the work */
@@ -514,6 +523,11 @@ void *worker(void *arg){
     free(task);
 
     pthread_mutex_lock(&tpool->work_lock);
+      struct timespec time_complete;
+      clock_gettime(CLOCK_MONOTONIC, &time_complete);
+      task_metric->duration = TIME_DIFF_MICROS(task_metric->scheduled, task_metric->time_complete);
+      // push task metric to metrics queue
+      
       tpool->activeTasks--;
       if (tpool->queue->size == 0 && tpool->activeTasks == 0)
         pthread_cond_signal(&tpool->waiting);
@@ -533,7 +547,7 @@ ThreadPool *initThreadPool(int numthreads){
   tpool->stop = 0;
   tpool->activeTasks = 0;
 
-  tpool->threads = malloc(numthreads * sizeof(pthread_t));
+  tpool->threads = malloc((numthreads-1) * sizeof(pthread_t));
   if(tpool->threads == NULL){
     perror("malloc");
     exit(1);
@@ -550,7 +564,11 @@ ThreadPool *initThreadPool(int numthreads){
   pthread_cond_init(&tpool->waiting, NULL); 
 
   for(int i = 0; i<numthreads; i++){
-    pthread_create(&tpool->threads[i], NULL, worker, tpool);
+    if (i == 0) {
+      pthread_create(&tpool->metricThread, NULL, monitor, tpool);
+    }
+    else 
+      pthread_create(&tpool->threads[i], NULL, worker, tpool);
   }
 
   return tpool;

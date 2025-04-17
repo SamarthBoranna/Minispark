@@ -66,7 +66,15 @@ typedef struct {
   size_t duration; // in usec
   RDD* rdd;
   int pnum;
+  struct Task *next;
 } TaskMetric;
+
+typedef struct{
+  struct TaskMetric *head;
+  struct TaskMetric *tail;
+  int size;
+}TaskMetricQueue;
+
 
 typedef struct Task{ //
   RDD* rdd;
@@ -79,7 +87,6 @@ typedef struct{
   struct Task *head;
   struct Task *tail;
   int size;
-  //pthread_mutex_t lock;
 }TaskQueue;
 
 typedef struct{
@@ -90,6 +97,7 @@ typedef struct{
   pthread_mutex_t work_lock;
   pthread_cond_t toBeDone;
   pthread_cond_t waiting;
+  TaskMetricQueue* TMqueue;
   pthread_t metricThread;
   int activeTasks;
 }ThreadPool;
@@ -143,8 +151,6 @@ void MS_TearDown();
 
 /*Task Queue Functions*/
 void initQueue(TaskQueue* queue);
-//Task *pop(TaskQueue *queue);
-//int push(TaskQueue *queue, Task *taskToPush);
 void freeQueue(Task *head);
 
 /*List Functions*/
@@ -155,12 +161,16 @@ node *nextList(node *curr_node);
 node *seek_from_start(List *list);
 void freeList(List *list);
 
+/*Task Metric Queue Functions*/
+TaskMetricQueue *initTMQ();
+TaskMetric *TMQpop(TaskMetricQueue *TMqueue);
+int TMQpush(TaskMetricQueue *TMqueue, TaskMetric *TM_ToPush);
+
 /*Thread Pool Functions*/
 ThreadPool *initThreadPool(int numthreads);
 void thread_pool_destroy();
 void thread_pool_wait();
 int thread_pool_submit(ThreadPool* tpool, Task* task);
-
 
 
 #endif // __minispark_h__

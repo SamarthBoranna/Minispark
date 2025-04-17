@@ -38,7 +38,7 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   {
     RDD *dep = va_arg(args, RDD *);
     rdd->dependencies[i] = dep;
-    maxpartitions = max(maxpartitions, dep->partitions->size);
+    maxpartitions = max(maxpartitions, dep->numpartitions);
   }
   va_end(args);
 
@@ -67,8 +67,6 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
 RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 {
   RDD *rdd = create_rdd(1, PARTITIONBY, fn, dep);
-  List* list = malloc(sizeof(List));
-  rdd->partitions = list_init(list);
   rdd->numpartitions = numpartitions;
   rdd->ctx = ctx;
   return rdd;
@@ -431,41 +429,7 @@ void initQueue(TaskQueue* queue) {
   //pthread_mutex_init(&queue->lock, NULL);
 }
 
-/*
-Task *pop(TaskQueue *queue){
-  pthread_mutex_lock(&queue->lock);
-  if(queue == NULL || queue->head == NULL){
-    pthread_mutex_unlock(&queue->lock);
-    return NULL;
-    //error?
-  }
 
-  Task *popped = queue->head;
-  Task *next = popped->next;
-  queue->head = next;
-  queue->size -= 1;
-  pthread_mutex_unlock(&queue->lock);
-
-  return popped;
-}
-
-int push(TaskQueue *queue, Task *taskToPush){
-  taskToPush->next = NULL;
-  pthread_mutex_lock(&queue->lock);
-  if(queue->head == NULL){
-    queue->head = taskToPush;
-    queue->tail = taskToPush;
-  }
-  else{
-    Task *tail = queue->tail;
-    tail->next = taskToPush;
-    queue->tail = taskToPush;
-  }
-  queue->size += 1;
-  pthread_mutex_unlock(&queue->lock);
-  return 0;
-}
-*/
 
 void freeQueue(Task *head) {
   Task *current = head;
@@ -476,6 +440,7 @@ void freeQueue(Task *head) {
   }
 }
 
+//////// Free RDD ////////
 void freeRDD(RDD *rdd){
   if (rdd == NULL) return;
   for (int i = 0; i < rdd->numdependencies; i++) {
@@ -487,58 +452,56 @@ void freeRDD(RDD *rdd){
   free(rdd);
 }
 
+//////// Task Metric Funcs ///////////
+
+TaskMetricQueue *initTMQ(TaskMetricQueue* TMQueue){
+  TMQueue->head = NULL;
+  TMQueue->tail = NULL;
+  TMQueue->size = 0;
+}
+
+TaskMetric *TMQpop(TaskMetricQueue *TMqueue){
+  if(TMqueue == NULL || TMqueue->head == NULL){
+    return NULL;
+    //error?
+  }
+  TaskMetric *popped = TMqueue->head;
+  TaskMetric *next = popped->next;
+  TMqueue->head = next;
+  TMqueue->size -= 1;
+
+  return popped;
+}
+
+int TMQpush(TaskMetricQueue *TMqueue, TaskMetric *TM_ToPush){
+  TM_ToPush->next = NULL;
+  if(TMqueue->head == NULL){
+    TMqueue->head = TM_ToPush;
+    TMqueue->tail = TM_ToPush;
+  }
+  else{
+    Task *tail = TMqueue->tail;
+    tail->next = TM_ToPush;
+    TMqueue->tail = TM_ToPush;
+  }
+  TMqueue->size += 1;
+  return 0;
+}
+
 //////// Thread Pool Actions ////////
 
-/*
-void *worker(void *argument){
-  ThreadPool *tpool = (ThreadPool *)argument;
-
-  while(1){
-    pthread_mutex_lock(&tpool->work_lock);
-    TaskQueue *queue = tpool->queue;
-    while(queue->size == 0 && tpool->stop == 0){
-      pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
-    }
-
-    if(tpool->stop && queue->head == NULL){
-      pthread_mutex_unlock(&tpool->work_lock);
-      break;
-    }
-
-    Task *taskToBeDone = pop(queue);
-    tpool->activeTasks += 1;
-    pthread_mutex_unlock(&tpool->work_lock);
-
-    if(taskToBeDone != NULL){
-      materialize(taskToBeDone->rdd, taskToBeDone->pnum);
-      free(taskToBeDone);
-
-      pthread_mutex_lock(&tpool->work_lock);
-      tpool->activeTasks -= 1;
-      if(queue->size == 0 && tpool->activeTasks == 0){
-        pthread_cond_signal(&tpool->waiting);
-      }
-      pthread_mutex_unlock(&tpool->work_lock);
-    }
-  }
-  return NULL;
-}
-  */
 
 void *worker(void *arg){
   ThreadPool *tpool = arg;
   while (1) {
     pthread_mutex_lock(&tpool->work_lock);
-      /* wait for work or shutdown */
-      while (tpool->queue->size == 0 && !tpool->stop) {
+      while (tpool->queue->size == 0 && tpool->stop == 0) {
         pthread_cond_wait(&tpool->toBeDone, &tpool->work_lock);
       }
-      /* time to exit? */
-      if (tpool->stop) {
+      if (tpool->stop == 1) {
         pthread_mutex_unlock(&tpool->work_lock);
         break;
       }
-      /* pop one task */
       Task *task = tpool->queue->head;
       tpool->queue->head = task->next;
       if (tpool->queue->head == NULL)
@@ -547,7 +510,6 @@ void *worker(void *arg){
       tpool->activeTasks++;
     pthread_mutex_unlock(&tpool->work_lock);
 
-    /* actually do the work */
     materialize(task->rdd, task->pnum);
     free(task);
 
@@ -643,14 +605,4 @@ int thread_pool_submit(ThreadPool *tpool, Task *task) {
   return 0;
 }
 
-/*
-int thread_pool_submit(ThreadPool* tpool, Task* task){
-  int push_val = push(tpool->queue, task);
-  if(push_val == 0){
-    pthread_mutex_lock(&tpool->work_lock);
-    pthread_cond_signal(&tpool->toBeDone);
-    pthread_mutex_unlock(&tpool->work_lock);
-  }
-  return push_val;
-}
-*/
+

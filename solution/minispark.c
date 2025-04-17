@@ -549,6 +549,8 @@ ThreadPool *initThreadPool(int numthreads){
   tpool->activeTasks = 0;
 
   tpool->threads = malloc((numthreads-1) * sizeof(pthread_t));
+  tpool->metricThread = malloc(sizeof(pthread_t));
+
   if(tpool->threads == NULL){
     perror("malloc");
     exit(1);
@@ -559,7 +561,11 @@ ThreadPool *initThreadPool(int numthreads){
     perror("malloc");
     exit(1);
   }
+
+  tpool->TMqueue = malloc(sizeof(TaskMetricQueue));
+
   initQueue(tpool->queue);
+  initTMQ(tpool->TMqueue);
   pthread_mutex_init(&tpool->work_lock, NULL);
   pthread_cond_init(&tpool->toBeDone, NULL);
   pthread_cond_init(&tpool->waiting, NULL); 

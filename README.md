@@ -1,4 +1,4 @@
-# Minispark
+# Minispark: Thread-Based Spark Implementation
 Distributed data processing frameworks are crucial for performing data
 analytics on large quantaties of data. Frameworks like MapReduce and
 Spark are powerful and relatively simple to program. Users of Spark

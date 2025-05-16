@@ -7,12 +7,12 @@ data on distributed clusters, automatically handling difficult
 problems of distributed computing -- parallel processing,
 inter-process communication, and fault tolerance.
 
-In this project, we will built a mini implementation of Spark using
+In this project, I built a mini implementation of Spark using
 threads on a single node. Spark represents data processing as a
 directed acyclic graph, where the nodes are intermediate
 representations of data, known as RDDs, and the edges are
 transformations upon the data. Segments of the graph may be operated
-on in parallel, and thus a central challenge of this project will be
+on in parallel, and thus a central challenge of this project was
 to understand the data model and how it may be mapped to worker
 threads.
 
@@ -21,34 +21,6 @@ Learning objectives:
 - To implement a correct MiniSpark framework with several common data
   processing operators.
 - To efficiently process data in parallel using threads.
-
-## Background
-
-To understand how to make progress on any project that involves
-concurrency, you should understand the basics of thread creation,
-mutual exclusion (with locks), and signaling/waiting (with condition
-variables). These are described in the following book chapters:
-
-- [Intro to Threads](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-intro.pdf)
-- [Threads API](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-api.pdf)
-- [Locks](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-locks.pdf)
-- [Using Locks](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-locks-usage.pdf)
-- [Condition Variables](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-cv.pdf)
-
-Read these chapters carefully in order to prepare yourself for this
-project.
-
-You may also like to read two fundamental data processing papers which
-inspired this project:
-
-- [MapReduce](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf)
-- [Resilient Distributed Datasets](https://www.usenix.org/system/files/conference/nsdi12/nsdi12-final138.pdf)
-
-Spark is a widely-used system for large-scale data analytics. If this
-interests you, you can learn much more about big data processing in
-classes like [CS
-544](https://tyler.caraza-harter.com/cs544/s25/syllabus.html) or [CS
-744](https://pages.cs.wisc.edu/~shivaram/cs744-sp25/).
 
 ## General Idea
 
